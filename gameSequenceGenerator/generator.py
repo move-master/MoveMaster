@@ -7,7 +7,7 @@ print("running game sequence generator...\n")
 class Block:
     def __init__(self, ID, pos):
         self.ID = int(ID)
-        self.pos = pos  # not heavily used, but kept for continuity
+        self.pos = pos
 
     def __repr__(self):
         if self.ID == -1:
@@ -65,10 +65,6 @@ class Tower:
         return (None, None)
 
     def isTowerValid(self):
-        # Keep basic structural checks:
-        # - 18 to 54 layers
-        # - IDs must be in 1..54 or -1 (null)
-        # - Exactly 54 distinct non-null IDs + the -1 sentinel
         if len(self.tower) < 18 or len(self.tower) > 54:
             return False
         blockSet = set([-1])
@@ -92,10 +88,8 @@ class Tower:
         if lvl is None:
             return False
 
-        # Remove source block
         self.tower[lvl][idx].setID(-1)
 
-        # Place onto top
         topLayer = self.tower[-1]
         hasNull = any(b.getID() == -1 for b in topLayer)
         if hasNull:
@@ -104,7 +98,6 @@ class Tower:
             topLayer[newPos - 1] = Block(ID, newPos)
         else:
             newLayer = [Block(-1, 1), Block(-1, 2), Block(-1, 3)]
-            # new layer is empty by construction
             newLayer[newPos - 1] = Block(ID, newPos)
             self.tower.append(newLayer)
 
@@ -126,20 +119,17 @@ class Tower:
             randPos = random.choice(pos_cycle)
             pos_cycle.remove(randPos)
 
-            # Never remove from the current top layer
             topIDs = set(b.getID() for b in self.tower[-1])
             randID = 0
             while randID == 0 or randID in topIDs:
                 randID = random.randint(1, 54)
 
             ok = self.move(randID, randPos)
-            # record the attempted move regardless of success (kept consistent with your prior format)
             if randID < 10:
                 sequence += "0"
             sequence += f"{randID}.{randPos} "
 
             if not ok:
-                # illegal structural move ends the sequence
                 return sequence
 
             if not self.isTowerValid():
@@ -150,11 +140,9 @@ class Tower:
 
 
 def isValidSequence(_seq):
-    # Stub left as-is; your earlier code treated this trivially for generation.
     return True
 
 
-# Driver scaffold (left intact but off by default)
 seqSet = set()
 seqLenLst = []
 SEQ_GEN_NUM = 10000
