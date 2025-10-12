@@ -52,7 +52,7 @@ state_size = len(state)                         # should be 109
 action_size = env.action_space.n               # should be 162
 
 # ----- Nets / Opt -----
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 policy_net = DQN(state_size, action_size).to(device)
 target_net = DQN(state_size, action_size).to(device)
 target_net.load_state_dict(policy_net.state_dict())

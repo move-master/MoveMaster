@@ -11,7 +11,7 @@ total, steps = 0.0, 0
 while True:
     legal = np.nonzero(mask)[0]
     assert len(legal) > 0, "No legal actions available!"
-    a = int(np.random.choice(legal))
+    a = int(np.random.choice(legal)) # KAT: This needs to be replaced with our policy
     obs, r, term, trunc, info = env.step(a)
     mask = info["action_mask"]
     total += r; steps += 1
