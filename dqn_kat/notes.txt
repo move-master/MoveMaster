@@ -1,0 +1,62 @@
+Original Tower (Height == 2)
+111 111
+
+Action Space: (9 possible state transitions)
+011 111 100
+011 111 010
+011 111 001
+
+101 111 100
+101 111 010
+101 111 001
+
+110 111 100
+110 111 010
+110 111 001
+
+=============================================
+Original Tower (Height == 3)
+111 111 111
+
+Action Space: (18 possible state transitions)
+011 111 111 100
+011 111 111 010
+011 111 111 001
+
+101 111 111 100
+101 111 111 010
+101 111 111 001
+
+110 111 111 100
+110 111 111 010
+110 111 111 001
+
+111 011 111 100
+111 011 111 010
+111 011 111 001
+
+111 101 111 100
+111 101 111 010
+111 101 111 001
+
+111 110 111 100
+111 110 111 010
+111 110 111 001
+
+Things I want the agent to have access to:
+- CoM of the tower
+- Height of the tower (including distance of the blocks from the top)
+
+- Discourage the agent from removing blocks from the base when possible
+- Encourage the agent to make moves that keep the CoM as centered as possible
+- Discourage the agent from removing blocks from layers that have 2 blocks
+- Rule of no picking from top layer / incomplete second-to-top layer should be HARDCODED in action space
+
+The maximum amount of transition states my algorithm would have to calculate is 153, as this reflects the number of possible first moves on a fresh 3x18 Jenga tower.
+Explanation:
+54 blocks in total, but top layer is never in play. So...
+- # of Movable blocks: 54 - 3 = 51.
+- # of Places: 3.
+
+51 * 3 = 153 possible moves at the start of Jenga. This is the largest possible action space in a classic Jenga game at any point in the game.
+
