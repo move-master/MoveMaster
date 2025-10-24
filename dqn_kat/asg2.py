@@ -14,7 +14,17 @@ class Tower:
 
         result = f"Tower({self.height}, {self.state})"
         return result
-# Initialize a tuple with the value 'hello' repeated 5 times
+    
+    def pretty(self):
+        counter = 0
+        layer = []
+        for block in reversed(self.state):
+            layer.insert(0, block)
+            counter += 1
+            if counter == 3:
+                counter = 0
+                print(layer)
+                layer = []
 
 
 def getLayer(tower : Tower, num : int):
@@ -43,18 +53,18 @@ def isValid(tower : Tower, flag : bool):
             if layer == tower.height-1:
                 result = True
             else:
-                if(flag): {print(f"False b/c encountered unstable layer")}
+                if(flag): {print(f"INVALID b/c encountered unstable layer")}
                 return False
         elif currLayer == [0,1,0] or currLayer == [1,0,1] or currLayer == [0,1,1] or currLayer == [1,1,0]:
             if layer != tower.height-2:
                 result = True
             else:
-                if(flag): {print(f"False b/c cannot remove blocks from layer directly below incomplete top layer")}
+                if(flag): {print(f"INVALID b/c cannot remove blocks from layer directly below incomplete top layer")}
                 return False
         else:
             result = True
     if totalBlocks != 54:
-        if(flag): {print(f"False b/c totalBlocks is {totalBlocks}")}
+        if(flag): {print(f"INVALID b/c totalBlocks is {totalBlocks}")}
         return False
     return result
 
@@ -64,6 +74,11 @@ def isValid(tower : Tower, flag : bool):
 if __name__ == "__main__":
     print("Running asg2.py...")
     state = (1,1,0,0,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,0,1,0,0,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,1)
+    totalBlocks = 0
+    for block in state:
+        totalBlocks += block
+    print(F"num blocks: {totalBlocks}")
     height = len(state)//3
     tower = Tower(height,state)
     print(f" is tower valid? >> {isValid(tower, True)}")
+    tower.pretty()
