@@ -1,0 +1,21 @@
+representation specifications:
+Our tower is represented by a binary string of length L such that L % 3 == 0. (i.e., L is always divisible by 3).
+
+0's represent empty spaces, meanwhile 1's represent blocks.
+
+Each tribit (i.e., each group of 3 binary bits), represents a layer in the tower.
+
+The first layer is X-Bound (this means that blocks are placed next to one another along the X-Axis).
+The second layer is Y-Bound (this means that blocks are placed next to one another along the Y-Axis).
+
+The third layer is X-Bound, the fourth layer is Y-Bound, and so on...
+Consequently, this means that:
+- all of the even-index layers are X-Bound
+- all of the odd-index layers are Y-Bound
+
+Additionally:
+- all of the blocks in an X-Bound layer have a y == 0.
+- all of the blocks in a Y-Bound layer have an x == 0.
+
+From left to right, the coordinate of a block in a tribit is -1, 0, +1.
+For instance, in an X-Bound layer at height z = 2 described by <100>, the coordinates of the leftmost block are (-1, 0, 2).
