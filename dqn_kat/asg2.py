@@ -1,3 +1,5 @@
+import copy
+
 class InitializationError(Exception):
     pass
 
@@ -10,8 +12,17 @@ class Tower:
         
     def __repr__(self):
 
-        result = f"Tower({self.height}, {self.state})"
+        result = f"Tower({self.state})"
         return result
+    
+    def __eq__(self, other):
+        if self.state == other.state:
+            return True
+        else:
+            return False
+        
+    def __hash__(self):
+        return hash(self.state)
     
     # Prints a "pretty" visualization of the tower, where each layer is represented as a list of three elements.
     # Printed from the top down, so last layer corresponds to bottom of the tower.
@@ -75,6 +86,32 @@ def isValid(tower : Tower, flag : bool):
         return False
     return result
 
+def getSuccessors(tower : Tower, succSet : set, rd : int):
+    successors = []
+    state = list(tower.state)
+    if state[-3:] == [1,1,1]:
+        state.extend([0,0,0])
+    originalState = copy.deepcopy(state)
+    for i in range(len(state)-6):
+        state = copy.deepcopy(originalState)
+        for j in range(len(state)-3,len(state),1):
+
+            state = copy.deepcopy(originalState)
+            if state[j] == 0:
+                state[i], state[j] = state[j], state[i]
+                sTower = Tower(tuple(state))
+                if sTower in succSet:
+                    continue
+                if isValid(sTower, False):
+                    successors.append(sTower)
+                    succSet.add(sTower)
+    if len(successors) == 0:
+        return
+    for s in successors:
+        getSuccessors(s, succSet, rd+1)
+
+
+    
 
 
 
@@ -92,3 +129,21 @@ if __name__ == "__main__":
         totalBlocks += block
     print(F"num blocks: {totalBlocks}")
     print(F"height: {len(state)//3}")
+
+
+    # Start state (for classic Jenga)
+    #startState = (1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1)
+    startState = (1,1,1,1,1,1)
+    startTower = Tower(startState)
+    startTower.pretty()
+    print(f" is tower valid? >> {isValid(startTower, True)}")
+    totalBlocks = 0
+    for block in startState:
+        totalBlocks += block
+    print(F"num blocks: {totalBlocks}")
+    print(F"height: {len(startState)//3}")
+    
+    mySet = set()
+    getSuccessors(startTower, mySet, 0)
+    for tower in mySet:
+        print(tower)
