@@ -60,3 +60,16 @@ Explanation:
 
 51 * 3 = 153 possible moves at the start of Jenga. This is the largest possible action space in a classic Jenga game at any point in the game.
 
+---------------------------------------------------
+After writing getSuccessors() and running this recursively, it seems computationally expensive to generate the entire state space for Jenga...
+For a 3x2 tower, running getSuccessors() recursively outputs 12 states. This is correct.
+For a 3x3 tower, running getSuccessors() recursively outputs 154 states.
+For a 3x4 tower, running getSuccessors() recursively outputs 2,210 states.
+For a 3x5 tower, running getSuccessors() recursively outputs 31,080 states.
+Seemingly, the number of possible states scales exponentially with every additional layer added.
+
+So, we will have to find a way to work around not having access to the entire state space.
+
+Good news is, the state space is still finite, so we should be able to proceed with DQN.
+
+Also, getSuccessors() is easily converted to a non-recursive function, only generating the successor states for a single state, and no further successors.

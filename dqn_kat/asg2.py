@@ -120,7 +120,7 @@ if __name__ == "__main__":
     
     # The following state, while it passes the validator, is not possible to achieve through legal Jenga moves.
     state = (0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,0,1,1,1,1,0,0)
-
+    """
     tower = Tower(state)
     tower.pretty()
     print(f" is tower valid? >> {isValid(tower, True)}")
@@ -129,21 +129,21 @@ if __name__ == "__main__":
         totalBlocks += block
     print(F"num blocks: {totalBlocks}")
     print(F"height: {len(state)//3}")
-
+    """
 
     # Start state (for classic Jenga)
     #startState = (1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1)
     startState = (1,1,1,1,1,1)
     startTower = Tower(startState)
-    startTower.pretty()
-    print(f" is tower valid? >> {isValid(startTower, True)}")
+    #startTower.pretty()
+    #print(f" is tower valid? >> {isValid(startTower, True)}")
     totalBlocks = 0
     for block in startState:
         totalBlocks += block
-    print(F"num blocks: {totalBlocks}")
-    print(F"height: {len(startState)//3}")
+    #print(F"num blocks: {totalBlocks}")
+    #print(F"height: {len(startState)//3}")
     
     mySet = set()
     getSuccessors(startTower, mySet, 0)
-    for tower in mySet:
-        print(tower)
+    for state in mySet:
+        print(state)
