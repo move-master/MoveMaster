@@ -2,196 +2,202 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 
+from com import com as compute_COM
+
 LEFT, MIDDLE, RIGHT = 0, 1, 2
 
 def encode_action(block_id: int, place_slot: int) -> int:
     return block_id * 3 + place_slot
 
-def decode_action(a: int) -> tuple[int, int]:
-    return a // 3, a % 3
+def decode_action(a: int) -> tuple[int, int, int]:
+    block_id = a // 3
+    place_slot = a % 3
+    layer, pos = divmod(block_id, 3)
+    return layer, pos, place_slot
 
 class JengaEnv(gym.Env):
-    """
-    Jenga environment with fixed-size observation and action spaces.
-    Action masking is provided via info['action_mask'] on reset() and step().
-    
-    Observation: [ height_norm, (edge_center_i, dist_norm_i) for i in 0..53 ]
-    Action: Discrete(162) -> (block_id ∈ [0,53], place_slot ∈ {0,1,2})
-    A move = choose block, remove, place on top (one step).
-    """
     metadata = {"render_modes": []}
 
-    def __init__(self, start_height_layers: int = 5, max_steps: int = 200, seed: int | None = None):
+    def __init__(
+        self,
+        start_height_layers: int = 5,
+        max_steps: int = 200,
+        seed: int | None = None,
+        com_half_span: float = 1.0):
         super().__init__()
+        assert 1 <= start_height_layers <= 18
         self.start_height_layers = start_height_layers
         self.max_steps = max_steps
         self.rng = np.random.default_rng(seed)
 
-        # --- Spaces ---
-        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(1 + 54*2,), dtype=np.float32)
+        self.com_half_span = float(com_half_span)  
+        self.gamma_rl = 0.99
+        self.alpha_phi = 1.0
+
+        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(56,), dtype=np.float32)
         self.action_space = spaces.Discrete(54 * 3)
 
-        # --- Properties that define the "board" ---
-        # Edge/center label is static. Example pattern for a classic 3-per-layer stack:
-        # We'll mark indices within each layer [3k, 3k+1, 3k+2] with [edge=1, center=0, edge=1]
-        self.edge_center = np.zeros(54, dtype=np.int32)
-        for layer in range(18):
-            i0, i1, i2 = 3*layer, 3*layer + 1, 3*layer + 2
-            self.edge_center[i0] = 1
-            self.edge_center[i1] = 0
-            self.edge_center[i2] = 1
+        self.occ: np.ndarray | None = None
+        self.height: int = 0
+        self.steps: int = 0
 
-        # Dynamic state
-        self.height = None                 # integer layers currently built (0..54/3) but we’ll treat as blocks/3; you can choose
-        self.distance = None               # int distance-from-top per block (0 means on top)
-        self.steps = 0
-
-        # Bookkeeping for reward shaping
-        self.prev_height = None
-
-    # ---------- Core Gym API ----------
     def reset(self, seed: int | None = None, options=None):
         if seed is not None:
             self.rng = np.random.default_rng(seed)
-
-        # Initialize distances based on starting tower height
-        # Let the top layer blocks have distance 0, next layer 1, etc.
-        H_layers = self.start_height_layers
-        self.height = H_layers
-        self.prev_height = self.height
         self.steps = 0
-
-        # Fill distance:
-        # For the first H_layers*3 blocks, assign distances by layer-from-top
-        self.distance = np.full(54, 99, dtype=np.int32)  # 99 means not yet in tower (below base)
-        # Build from bottom to top: bottom layer has largest distance, top has distance 0.
-        # We'll store distance-from-top = (top_index - layer_index)
-        # More simply: for each layer ℓ=0..H_layers-1 from bottom, its distance = (H_layers-1 - ℓ)
-        for layer in range(H_layers):
-            d = H_layers - 1 - layer
-            i0, i1, i2 = 3*layer, 3*layer+1, 3*layer+2
-            self.distance[i0] = d
-            self.distance[i1] = d
-            self.distance[i2] = d
-
-        obs = self._get_obs()
-        info = {"action_mask": self._action_mask()}
-        return obs, info
+        self.height = self.start_height_layers
+        self.occ = np.zeros((18, 3), dtype=np.uint8)
+        for l in range(self.height):
+            self.occ[l, :] = 1
+        return self._get_obs(), {"action_mask": self._action_mask()}
 
     def step(self, action: int):
+        assert self.occ is not None
         self.steps += 1
-        block_id, place_slot = decode_action(action)
 
-        illegal = self.distance[block_id] < 2
-        fell = False
-        height_gain = 0
-        reward = -0.01  # step cost
+        reward = -0.01
+        done = False
+        truncated = False
 
-        if illegal:
+        mask = self._action_mask()
+        if mask.sum() == 0:
+            reward += -1.0
+            done = True
+            return self._get_obs(), reward, done, truncated, {"action_mask": mask}
+        illegal_by_mask = not (0 <= action < self.action_space.n and mask[action] == 1)
+
+        layer, pos, place_slot = decode_action(action)
+        top = self.height - 1 if self.height > 0 else -1
+        k_layer = int(self.occ[layer].sum()) if (0 <= layer < self.height) else 0
+        d = top - layer
+
+        guard_illegal = (
+            (self.height <= 0) or
+            (layer < 0 or layer >= self.height) or
+            (d == 0) or
+            (d == 1 and k_layer < 3) or
+            (k_layer == 2) or
+            (self.occ[layer, pos] == 0)
+        )
+        if illegal_by_mask or guard_illegal:
             reward += -10.0
-        else:
-            # Apply the move: remove block, place on top
-            fell = self._apply_move(block_id, place_slot)
+            if self.steps >= self.max_steps:
+                truncated = True
+            return self._get_obs(), reward, done, truncated, {"action_mask": mask}
 
-            if not fell:
-                reward += 1.0
-                # Height increases when we complete a new top layer of 3 blocks.
-                # In this simple model, every successful placement increases height only
-                # when we just finished a layer. We’ll approximate: if the placed block’s
-                # distance becomes 0 and completes a set of three zeros → +0.1 and height += 1
-                completed_now = self._update_height_if_completed()
-                if completed_now:
-                    height_gain = 1
-                    reward += 0.1
+        phi_before = -abs(self._com_x_norm())
+        fell, height_gained = self._apply_move(layer, pos, place_slot)
 
-        done = fell or (self.steps >= self.max_steps)
         if fell:
             reward += -1.0
+            done = True
+        else:
+            reward += 1.0
+            if height_gained:
+                reward += 0.1
 
-        obs = self._get_obs()
-        info = {"action_mask": self._action_mask()}
+            phi_after = -abs(self._com_x_norm())
+            shaping = self.gamma_rl * phi_after - phi_before
+            reward += self.alpha_phi * shaping
 
-        return obs, reward, done, False, info
+        if self.steps >= self.max_steps and not done:
+            truncated = True
 
-    # ---------- Helpers ----------
-    def _get_obs(self):
-        height_norm = np.array([self.height / 54.0], dtype=np.float32)
-        dist_norm = np.clip(self.distance, 0, 54) / 54.0
-        ec = self.edge_center.astype(np.float32)
-        # Interleave (edge, dist) per block
-        per_block = np.stack([ec, dist_norm], axis=1).reshape(-1).astype(np.float32)
-        return np.concatenate([height_norm, per_block], dtype=np.float32)
+        return self._get_obs(), reward, done, truncated, {"action_mask": self._action_mask()}
 
-    def _action_mask(self):
-        # legal if distance >= 2
-        legal_blocks = (self.distance >= 2)
-        # Build mask of length 162 = 54*3
+    def _get_obs(self) -> np.ndarray:
+        height_norm = np.float32(self.height / 18.0)
+        com_x_norm = np.float32((self._com_x_norm() + 1.0) / 2.0)  # [-1,1] -> [0,1]
+        occ_flat = self.occ.astype(np.float32).reshape(-1)
+        return np.concatenate(([height_norm, com_x_norm], occ_flat), dtype=np.float32)
+
+    def _placement_layer_index(self) -> int:
+        if self.height <= 0:
+            return 0
+        top = self.height - 1
+        return top if self.occ[top].sum() < 3 else self.height
+
+    def _action_mask(self) -> np.ndarray:
         mask = np.zeros(self.action_space.n, dtype=np.int8)
-        for b in range(54):
-            if legal_blocks[b]:
-                for slot in (LEFT, MIDDLE, RIGHT):
-                    mask[encode_action(b, slot)] = 1
+        if self.height <= 0:
+            return mask
+
+        top_layer = self.height - 1
+        place_layer = self._placement_layer_index()
+
+        if place_layer < self.height:
+            open_placements = tuple(int(i) for i in np.where(self.occ[place_layer] == 0)[0])
+        else:
+            open_placements = (LEFT, MIDDLE, RIGHT)
+
+        for l in range(self.height):
+            d = top_layer - l
+            k = int(self.occ[l].sum())
+
+            if d == 0: continue                     
+            if d == 1 and k < 3: continue
+
+            for pos in (0, 1, 2):
+                if self.occ[l, pos] == 0:
+                    continue
+                block_id = l * 3 + pos
+                for place in open_placements:
+                    a = encode_action(block_id, place)
+                    mask[a] = 1
         return mask
 
-    def _apply_move(self, block_id: int, place_slot: int) -> bool:
-        """
-        Placeholder physics -> replace with your Unity bridge.
-        Logic:
-        - Removing a block near the top is safer than deep ones.
-        - Edge blocks slightly riskier than center.
-        - Higher towers are riskier.
-        We compute a "collapse probability" and sample.
-        If not collapsed:
-          - Set removed block distance to 0 (placed on new top)
-          - Increment all other distances by +1 (tower “shifted up”)
-        """
-        d = int(self.distance[block_id])
-        is_edge = int(self.edge_center[block_id])
+    def _apply_move(self, layer: int, pos: int, place_slot: int) -> tuple[bool, bool]:
+        top = self.height - 1
+        d = top - layer
+        denom = max(self.height - 1, 1)
+        depth_frac = d / denom
+        risk = 0.02 + 0.30 * (self.height / 18.0) + 0.25 * depth_frac + 0.60 * abs(self._com_x_norm())
+        k_layer = int(self.occ[layer].sum())
+        if k_layer == 2:
+            side = -1 if pos == 0 else (0 if pos == 1 else 1)
+            com = self._com_x_norm()
+            heavy_side = 1 if com > 0 else (-1 if com < 0 else 0)
+            align = 1.0 if (side != 0 and side == heavy_side) else 0.0
+            two_mid_bonus = 0.25 if side == 0 else 0.0
+            two_edge_bonus = 0.15 * align
+            depth_amp = 0.5 + 0.5 * depth_frac
+            risk += depth_amp * (two_mid_bonus + two_edge_bonus)
+        risk = float(np.clip(risk, 0.0, 0.95))
+        if self.rng.random() < risk:
+            return True, False
 
-        # --- Collapse probability heuristic (replace later) ---
-        # Base risk grows with normalized height and “depth” of the removed block.
-        h_norm = min(self.height / 54.0, 1.0)
-        depth_factor = np.tanh(d / 8.0)   # deeper pulls riskier, saturates
-        edge_bonus = 0.05 if is_edge else 0.0
+        self.occ[layer, pos] = 0
 
-        # Tighten this as you like:
-        p_collapse = 0.02 + 0.25*h_norm + 0.20*depth_factor + edge_bonus
-        p_collapse = float(np.clip(p_collapse, 0.0, 0.95))
-
-        if self.rng.random() < p_collapse:
-            return True  # fell
-
-        # --- Update distances after successful pull+place ---
-        # Everyone moves "one deeper" because we build up
-        self.distance[self.distance < 99] += 1
-
-        # Placed block goes on very top
-        self.distance[block_id] = 0
-
-        # (Optional) slight effect of place_slot on stability could be modeled later
-
-        return False
-
-    def _update_height_if_completed(self) -> bool:
-        """
-        If we now have three blocks with distance==0 (a full new top layer), count it as a height gain.
-        Then "relabel" them as the top layer and shift distances accordingly:
-        - increment height
-        - increase every block's distance by +1 so new placements start from 0 next step
-        """
-        zeros = np.where(self.distance == 0)[0]
-        if len(zeros) >= 3:
-            # Count a new layer. We won't enforce exact triplets by layer index in this simple placeholder.
+        top = self.height - 1
+        if self.occ[top].sum() == 3 and self.height < 18:
             self.height += 1
-            # Push all distances down by +1 to make room for next top
-            self.distance[self.distance < 99] += 1
-            # Keep the just-placed three as distance 0 to represent the new top
-            # We’ll pick any three zeros (already at zero). Ensure 3 remain at zero:
-            # First set all zeros to 1, then set three back to 0.
-            z = np.where(self.distance == 1)[0]  # those that were zero before the +1
-            if len(z) > 0:
-                self.distance[z] = 1
-            keep = zeros[:3]
-            self.distance[keep] = 0
-            return True
-        return False
+            self.occ[self.height - 1, :] = 0
+            top = self.height - 1
+
+        self.occ[top, place_slot] = 1
+
+        height_gained = False
+        if self.occ[top].sum() == 3 and self.height < 18:
+            self.height += 1
+            self.occ[self.height - 1, :] = 0
+            height_gained = True
+
+        return False, height_gained
+
+    def _com_vec(self) -> np.ndarray:
+        if self.height <= 0:
+            return np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        bits = self.occ[: self.height].reshape(-1).astype(int).tolist()
+        vec = compute_COM(bits)
+        v = np.asarray(vec, dtype=np.float32)
+        if not np.isfinite(v).all():
+            v = np.nan_to_num(v, nan=0.0, posinf=0.0, neginf=0.0)
+        return v
+
+    def _com_x_norm(self) -> float:
+        x = float(self._com_vec()[0])
+        span = max(self.com_half_span, 1e-6)
+        return float(np.clip(x / span, -1.0, 1.0))
+
+    def render(self): ...
+    def close(self): ...

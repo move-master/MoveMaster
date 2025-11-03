@@ -4,13 +4,13 @@ from collections import deque
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import gymnasium as gym
+import os
 
 from JengaEnv import JengaEnv 
 
 # ----- DQN -----
 class DQN(nn.Module):
-    def __init__(self, state_size, action_size):
+    def __init__(self, state_size: int, action_size: int):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(state_size, 256), nn.ReLU(),
@@ -20,103 +20,103 @@ class DQN(nn.Module):
     def forward(self, x): return self.net(x)
 
 def masked_argmax(q_values: np.ndarray, mask: np.ndarray) -> int:
-    masked = q_values.copy()
-    masked[mask == 0] = -1e9
-    return int(masked.argmax())
+    q = q_values.copy()
+    q[mask == 0] = -1e9
+    return int(q.argmax())
 
-def get_action(state, epsilon, mask, policy_net, device):
+@torch.no_grad()
+def get_action(state, epsilon, mask, policy, device):
     legal = np.nonzero(mask)[0]
     if len(legal) == 0:
         return 0
     if np.random.rand() < epsilon:
         return int(np.random.choice(legal))
-    with torch.no_grad():
-        s = torch.as_tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
-        q = policy_net(s).cpu().numpy()[0]
+    s = torch.as_tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+    q = policy(s).cpu().numpy()[0]
     return masked_argmax(q, mask)
 
-# ----- Hyperparams -----
 gamma = 0.99
-epsilon, epsilon_min, epsilon_decay = 1.0, 0.01, 0.995
+eps, eps_min, eps_decay = 1.0, 0.05, 0.997
 lr = 1e-3
 batch_size = 64
-memory_size = 100_000
-target_update_freq = 1000
+replay_cap = 100_000
 warmup = 1000
+tau = 0.005
+episodes = 10_000
+save_every = 1000
+save_path = os.path.join("checkpoints", "policy.pth")
+os.makedirs("checkpoints", exist_ok=True)
 
-# ----- Env -----
-env = JengaEnv(start_height_layers=5, max_steps=200, seed=0)
+def make_env(seed=None):
+    return JengaEnv(start_height_layers=5, max_steps=200, seed=seed, com_half_span=1.0)
+
+env = make_env(seed=0)
 state, info = env.reset()
 mask = info["action_mask"]
-state_size = len(state)                         # should be 109
-action_size = env.action_space.n               # should be 162
+state_size = len(state)
+action_size = env.action_space.n 
+print("state_size", state_size, "action_size", action_size)
 
-# ----- Nets / Opt -----
-device = torch.device("cpu")
-policy_net = DQN(state_size, action_size).to(device)
-target_net = DQN(state_size, action_size).to(device)
-target_net.load_state_dict(policy_net.state_dict())
-target_net.eval()
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+policy = DQN(state_size, action_size).to(device)
+target = DQN(state_size, action_size).to(device)
+target.load_state_dict(policy.state_dict())
+target.eval()
 
-optimizer = optim.Adam(policy_net.parameters(), lr=lr)
+opt = optim.Adam(policy.parameters(), lr=lr)
 loss_fn = nn.SmoothL1Loss()
+buf = deque(maxlen=replay_cap)
 
-# ----- Replay -----
-memory = deque(maxlen=memory_size)
-
-# ----- Training loop -----
 global_step = 0
-episodes = 2000
-
 for ep in range(episodes):
     state, info = env.reset()
     mask = info["action_mask"]
-    ep_reward = 0.0
+    ep_return = 0.0
+    done = False
 
-    while True:
-        action = get_action(state, epsilon, mask, policy_net, device)
+    while not done:
+        action = get_action(state, eps, mask, policy, device)
         next_state, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
         next_mask = info["action_mask"]
 
-        memory.append((state, action, reward, next_state, float(done)))
+        buf.append((state, action, reward, next_state, float(done)))
         state, mask = next_state, next_mask
-        ep_reward += reward
+        ep_return += reward
         global_step += 1
 
-        # Learn
-        if len(memory) >= warmup and global_step % 4 == 0:
-            batch = random.sample(memory, batch_size)
-            s,a,r,s2,d = zip(*batch)
+        if len(buf) >= warmup and global_step % 4 == 0:
+            batch = random.sample(buf, batch_size)
+            s, a, r, s2, d = zip(*batch)
+
             s  = torch.as_tensor(np.array(s),  dtype=torch.float32, device=device)
             a  = torch.as_tensor(a,           dtype=torch.int64,   device=device).unsqueeze(1)
             r  = torch.as_tensor(r,           dtype=torch.float32, device=device).unsqueeze(1)
             s2 = torch.as_tensor(np.array(s2),dtype=torch.float32, device=device)
             d  = torch.as_tensor(d,           dtype=torch.float32, device=device).unsqueeze(1)
 
-            # Double DQN target
             with torch.no_grad():
-                next_q_online = policy_net(s2)                  # (B, A)
-                a2 = torch.argmax(next_q_online, dim=1, keepdim=True)  # (B,1)
-                next_q_target = target_net(s2).gather(1, a2)    # (B,1)
-                target_q = r + gamma * (1 - d) * next_q_target
+                a2 = policy(s2).argmax(dim=1, keepdim=True) 
+                q_tgt_next = target(s2).gather(1, a2)
+                y = r + gamma * (1 - d) * q_tgt_next
 
-            q = policy_net(s).gather(1, a)
-            loss = loss_fn(q, target_q)
+            q = policy(s).gather(1, a)
+            loss = loss_fn(q, y)
+            opt.zero_grad(); loss.backward()
+            nn.utils.clip_grad_norm_(policy.parameters(), 10.0)
+            opt.step()
 
-            optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), 10.0)
-            optimizer.step()
+            with torch.no_grad():
+                for tp, p in zip(target.parameters(), policy.parameters()):
+                    tp.data.mul_(1 - tau).add_(tau * p.data)
 
-        if global_step % target_update_freq == 0:
-            target_net.load_state_dict(policy_net.state_dict())
+    if eps > eps_min:
+        eps = max(eps_min, eps * eps_decay)
 
-        if done:
-            break
+    print(f"ep {ep+1:05d}  return {ep_return:7.2f}  eps {eps:.3f}")
 
-    # epsilon decay
-    if epsilon > epsilon_min:
-        epsilon *= epsilon_decay
+    if (ep + 1) % save_every == 0:
+        torch.save(policy.state_dict(), save_path)
+        print(f"Saved checkpoint: {save_path}")
 
-    print(f"Ep {ep+1} | R={ep_reward:.2f} | eps={epsilon:.3f}")
+env.close()
