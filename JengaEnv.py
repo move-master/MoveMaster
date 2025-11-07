@@ -32,7 +32,7 @@ class JengaEnv(gym.Env):
 
         self.com_half_span = float(com_half_span)  
         self.gamma_rl = 0.99
-        self.alpha_phi = 1.0
+        self.alpha_phi = 1.6
 
         self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(56,), dtype=np.float32)
         self.action_space = spaces.Discrete(54 * 3)
@@ -64,6 +64,7 @@ class JengaEnv(gym.Env):
             reward += -1.0
             done = True
             return self._get_obs(), reward, done, truncated, {"action_mask": mask}
+
         illegal_by_mask = not (0 <= action < self.action_space.n and mask[action] == 1)
 
         layer, pos, place_slot = decode_action(action)
@@ -76,16 +77,16 @@ class JengaEnv(gym.Env):
             (layer < 0 or layer >= self.height) or
             (d == 0) or
             (d == 1 and k_layer < 3) or
-            (k_layer == 2) or
             (self.occ[layer, pos] == 0)
         )
         if illegal_by_mask or guard_illegal:
             reward += -10.0
-            if self.steps >= self.max_steps:
-                truncated = True
+            done = True
             return self._get_obs(), reward, done, truncated, {"action_mask": mask}
 
-        phi_before = -abs(self._com_x_norm())
+        com_before = self._com_x_norm()
+        phi_before = -abs(com_before)
+
         fell, height_gained = self._apply_move(layer, pos, place_slot)
 
         if fell:
@@ -93,12 +94,28 @@ class JengaEnv(gym.Env):
             done = True
         else:
             reward += 1.0
+            reward += 0.05
             if height_gained:
                 reward += 0.1
 
-            phi_after = -abs(self._com_x_norm())
-            shaping = self.gamma_rl * phi_after - phi_before
-            reward += self.alpha_phi * shaping
+            com_after = self._com_x_norm()
+            phi_after = -abs(com_after)
+            reward += 0.5 * (self.gamma_rl * phi_after - phi_before)
+
+            top_now = self.height - 1
+            pull_depth = max(0, top_now - layer)
+            reward += 0.08 * max(0.0, 1.0 - (pull_depth / 4.0))
+
+            place_side = -1 if place_slot == 0 else (0 if place_slot == 1 else 1) 
+            com_sign = -1 if com_before < -1e-6 else (1 if com_before > 1e-6 else 0)
+            if com_sign != 0:
+                if place_side == -com_sign:
+                    reward += 0.06
+                elif place_side == 0:
+                    reward += 0.03  
+            else:
+                if place_side == 0:
+                    reward += 0.02
 
         if self.steps >= self.max_steps and not done:
             truncated = True
@@ -107,7 +124,7 @@ class JengaEnv(gym.Env):
 
     def _get_obs(self) -> np.ndarray:
         height_norm = np.float32(self.height / 18.0)
-        com_x_norm = np.float32((self._com_x_norm() + 1.0) / 2.0)  # [-1,1] -> [0,1]
+        com_x_norm = np.float32((self._com_x_norm() + 1.0) / 2.0) 
         occ_flat = self.occ.astype(np.float32).reshape(-1)
         return np.concatenate(([height_norm, com_x_norm], occ_flat), dtype=np.float32)
 
@@ -151,16 +168,16 @@ class JengaEnv(gym.Env):
         d = top - layer
         denom = max(self.height - 1, 1)
         depth_frac = d / denom
-        risk = 0.02 + 0.30 * (self.height / 18.0) + 0.25 * depth_frac + 0.60 * abs(self._com_x_norm())
+        risk = 0.02 + 0.20 * (self.height / 18.0) + 0.20 * depth_frac + 0.40 * abs(self._com_x_norm())
         k_layer = int(self.occ[layer].sum())
         if k_layer == 2:
             side = -1 if pos == 0 else (0 if pos == 1 else 1)
             com = self._com_x_norm()
             heavy_side = 1 if com > 0 else (-1 if com < 0 else 0)
             align = 1.0 if (side != 0 and side == heavy_side) else 0.0
-            two_mid_bonus = 0.25 if side == 0 else 0.0
-            two_edge_bonus = 0.15 * align
-            depth_amp = 0.5 + 0.5 * depth_frac
+            two_mid_bonus = 0.20 if side == 0 else 0.0
+            two_edge_bonus = 0.1 * align
+            depth_amp = 0.3 + 0.7 * depth_frac
             risk += depth_amp * (two_mid_bonus + two_edge_bonus)
         risk = float(np.clip(risk, 0.0, 0.95))
         if self.rng.random() < risk:
