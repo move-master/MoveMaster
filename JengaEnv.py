@@ -30,7 +30,7 @@ class JengaEnv(gym.Env):
         self.max_steps = max_steps
         self.rng = np.random.default_rng(seed)
 
-        self.com_half_span = float(com_half_span)  
+        self.com_half_span = float(com_half_span)
         self.gamma_rl = 0.99
         self.alpha_phi = 1.6
 
@@ -63,7 +63,11 @@ class JengaEnv(gym.Env):
         if mask.sum() == 0:
             reward += -1.0
             done = True
-            return self._get_obs(), reward, done, truncated, {"action_mask": mask}
+            return self._get_obs(), reward, done, truncated, {
+                "action_mask": mask,
+                "illegal": True,
+                "fell": False
+            }
 
         illegal_by_mask = not (0 <= action < self.action_space.n and mask[action] == 1)
 
@@ -82,7 +86,11 @@ class JengaEnv(gym.Env):
         if illegal_by_mask or guard_illegal:
             reward += -10.0
             done = True
-            return self._get_obs(), reward, done, truncated, {"action_mask": mask}
+            return self._get_obs(), reward, done, truncated, {
+                "action_mask": mask,
+                "illegal": True,
+                "fell": False
+            }
 
         com_before = self._com_x_norm()
         phi_before = -abs(com_before)
@@ -106,13 +114,13 @@ class JengaEnv(gym.Env):
             pull_depth = max(0, top_now - layer)
             reward += 0.08 * max(0.0, 1.0 - (pull_depth / 4.0))
 
-            place_side = -1 if place_slot == 0 else (0 if place_slot == 1 else 1) 
+            place_side = -1 if place_slot == 0 else (0 if place_slot == 1 else 1)
             com_sign = -1 if com_before < -1e-6 else (1 if com_before > 1e-6 else 0)
             if com_sign != 0:
                 if place_side == -com_sign:
                     reward += 0.06
                 elif place_side == 0:
-                    reward += 0.03  
+                    reward += 0.03
             else:
                 if place_side == 0:
                     reward += 0.02
@@ -120,11 +128,24 @@ class JengaEnv(gym.Env):
         if self.steps >= self.max_steps and not done:
             truncated = True
 
-        return self._get_obs(), reward, done, truncated, {"action_mask": self._action_mask()}
+        info_out = {"action_mask": self._action_mask()}
+        info_out["fell"] = bool(fell)
+        info_out["height_gained"] = bool(height_gained)
+
+        top_now = self.height - 1
+        pull_depth = max(0, top_now - layer)
+        info_out["pull_depth"] = int(pull_depth)
+
+        info_out["was_two_block"] = bool(k_layer == 2)
+
+        info_out["com_before"] = float(com_before)
+        info_out["com_after"] = float(self._com_x_norm()) if not fell else float(com_before)
+
+        return self._get_obs(), reward, done, truncated, info_out
 
     def _get_obs(self) -> np.ndarray:
         height_norm = np.float32(self.height / 18.0)
-        com_x_norm = np.float32((self._com_x_norm() + 1.0) / 2.0) 
+        com_x_norm = np.float32((self._com_x_norm() + 1.0) / 2.0)
         occ_flat = self.occ.astype(np.float32).reshape(-1)
         return np.concatenate(([height_norm, com_x_norm], occ_flat), dtype=np.float32)
 
@@ -151,7 +172,7 @@ class JengaEnv(gym.Env):
             d = top_layer - l
             k = int(self.occ[l].sum())
 
-            if d == 0: continue                     
+            if d == 0: continue
             if d == 1 and k < 3: continue
 
             for pos in (0, 1, 2):
