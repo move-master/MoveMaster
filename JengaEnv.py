@@ -40,12 +40,16 @@ class JengaEnv(gym.Env):
         self.occ: np.ndarray | None = None
         self.height: int = 0
         self.steps: int = 0
+        self.tall_p: float = 0.6
+
+    def set_tall_prob(self, p: float):
+        self.tall_p = float(np.clip(p, 0.0, 1.0))
 
     def reset(self, seed: int | None = None, options=None):
         if seed is not None:
             self.rng = np.random.default_rng(seed)
         self.steps = 0
-        self.height = self.start_height_layers
+        self.height = int(self.rng.integers(12, 19)) if (self.rng.random() < self.tall_p) else self.start_height_layers
         self.occ = np.zeros((18, 3), dtype=np.uint8)
         for l in range(self.height):
             self.occ[l, :] = 1
@@ -146,7 +150,10 @@ class JengaEnv(gym.Env):
     def _get_obs(self) -> np.ndarray:
         height_norm = np.float32(self.height / 18.0)
         com_x_norm = np.float32((self._com_x_norm() + 1.0) / 2.0)
-        occ_flat = self.occ.astype(np.float32).reshape(-1)
+        w = np.zeros_like(self.occ, dtype=np.float32)
+        if self.height > 0:
+            w[-self.height:, :] = self.occ[: self.height, :].astype(np.float32)
+        occ_flat = w.reshape(-1)
         return np.concatenate(([height_norm, com_x_norm], occ_flat), dtype=np.float32)
 
     def _placement_layer_index(self) -> int:
@@ -159,22 +166,17 @@ class JengaEnv(gym.Env):
         mask = np.zeros(self.action_space.n, dtype=np.int8)
         if self.height <= 0:
             return mask
-
         top_layer = self.height - 1
         place_layer = self._placement_layer_index()
-
         if place_layer < self.height:
             open_placements = tuple(int(i) for i in np.where(self.occ[place_layer] == 0)[0])
         else:
             open_placements = (LEFT, MIDDLE, RIGHT)
-
         for l in range(self.height):
             d = top_layer - l
             k = int(self.occ[l].sum())
-
             if d == 0: continue
             if d == 1 and k < 3: continue
-
             for pos in (0, 1, 2):
                 if self.occ[l, pos] == 0:
                     continue
@@ -203,23 +205,18 @@ class JengaEnv(gym.Env):
         risk = float(np.clip(risk, 0.0, 0.95))
         if self.rng.random() < risk:
             return True, False
-
         self.occ[layer, pos] = 0
-
         top = self.height - 1
         if self.occ[top].sum() == 3 and self.height < 18:
             self.height += 1
             self.occ[self.height - 1, :] = 0
             top = self.height - 1
-
         self.occ[top, place_slot] = 1
-
         height_gained = False
         if self.occ[top].sum() == 3 and self.height < 18:
             self.height += 1
             self.occ[self.height - 1, :] = 0
             height_gained = True
-
         return False, height_gained
 
     def _com_vec(self) -> np.ndarray:

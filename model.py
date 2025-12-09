@@ -49,44 +49,21 @@ def set_lr(optimizer, lr):
     for g in optimizer.param_groups:
         g["lr"] = lr
 
-def save_checkpoint(path, policy, target, opt, eps, global_step, ep):
-    blob = {
-        "policy": policy.state_dict(),
-        "target": target.state_dict(),
-        "opt": opt.state_dict(),
-        "eps": eps,
-        "global_step": global_step,
-        "ep": ep,
-    }
-    torch.save(blob, path)
-
-def load_checkpoint(path, policy, target, opt, device):
-    blob = torch.load(path, map_location=device)
-    policy.load_state_dict(blob["policy"])
-    target.load_state_dict(blob["target"])
-    opt.load_state_dict(blob["opt"])
-    eps = float(blob.get("eps", 0.05))
-    global_step = int(blob.get("global_step", 0))
-    ep = int(blob.get("ep", -1))
-    return eps, global_step, ep
-
 gamma = 0.99
-eps, eps_min, eps_decay = 1.0, 0.05, 0.9995
-anneal_start = 30_000
+eps, eps_min, eps_decay = 0.05, 0.10, 0.9995
+anneal_start = 20_000
 anneal_len = 20_000
-eps_floor_late = 0.02
-eps_delta = (0.05 - eps_floor_late) / max(anneal_len, 1)
+eps_floor_late = 0.10
+eps_delta = (0.10 - eps_floor_late) / max(anneal_len, 1)
 
 lr = 1e-3
 batch_size = 128
 replay_cap = 100_000
 warmup = 5000
-tau = 0.02
-episodes = 50_000
+tau = 0.01
+episodes = 100_000
 save_every = 5000
 save_path = os.path.join("checkpoints", "policy.pth")
-save_full_path = os.path.join("checkpoints", "policy_full.pth")
-resume_path = save_full_path
 os.makedirs("checkpoints", exist_ok=True)
 
 def make_env(seed=None):
@@ -174,14 +151,14 @@ def evaluate(policy, episodes=200):
     )
 
 if __name__ == "__main__":
-    start_ep = 0
     global_step = 0
-    if resume_path and os.path.exists(resume_path):
-        eps, global_step, last_ep = load_checkpoint(resume_path, policy, target, opt, device)
-        start_ep = last_ep + 1
-        target.eval()
-        print(f"Resumed from {resume_path} @ ep={last_ep}, step={global_step}, eps={eps:.3f}")
-    for ep in range(start_ep, episodes):
+    for ep in range(episodes):
+        if ep < 20_000:
+            env.set_tall_prob(0.10)
+        elif ep < 40_000:
+            env.set_tall_prob(0.30)
+        else:
+            env.set_tall_prob(0.60)
         state, info = env.reset()
         mask = info["action_mask"]
         ep_return = 0.0
@@ -225,7 +202,5 @@ if __name__ == "__main__":
         if (ep + 1) % save_every == 0:
             torch.save(policy.state_dict(), save_path)
             print(f"Saved checkpoint: {save_path}")
-            save_checkpoint(save_full_path, policy, target, opt, eps, global_step, ep)
-            print(f"Saved FULL checkpoint: {save_full_path}")
             evaluate(policy, episodes=200)
     env.close()
