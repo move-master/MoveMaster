@@ -155,7 +155,7 @@ public class PlaySequence : MonoBehaviour
     }
 
     // Replicates the exact logic from DestroyOnClick to place blocks
-    void SimulateMove(int blockTag, int topPositionID)
+    public void SimulateMove(int blockTag, int topPositionID)
     {
         // 1) Find the block by its tag
         GameObject blockObj = GameObject.FindWithTag(blockTag.ToString());
