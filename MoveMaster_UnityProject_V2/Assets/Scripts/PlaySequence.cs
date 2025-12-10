@@ -155,20 +155,18 @@ public class PlaySequence : MonoBehaviour
     }
 
     // Replicates the exact logic from DestroyOnClick to place blocks
-    public void SimulateMove(int blockTag, int topPositionID)
+    public int SimulateMove(int blockTag, int topPositionID)
     {
         // 1) Find the block by its tag
         GameObject blockObj = GameObject.FindWithTag(blockTag.ToString());
         if (!blockObj)
         {
             Debug.LogError($"Block with tag {blockTag} not found!");
-            return;
+            return 1;
         }
 
-        // 2) 'Remove' block from tower
-        blockObj.SetActive(false);
 
-        // 3) Calculate placement position, matching DestroyOnClick's logic
+        // 2) Calculate placement position, matching DestroyOnClick's logic
         Vector3 targetPos;
         switch (topPositionID)
         {
@@ -177,7 +175,7 @@ public class PlaySequence : MonoBehaviour
                 if (leftOccupied)
                 {
                     Debug.Log("Left position already occupied!");
-                    return;
+                    return 1;
                 }
                 leftOccupied = true;
                 break;
@@ -186,7 +184,7 @@ public class PlaySequence : MonoBehaviour
                 if (middleOccupied)
                 {
                     Debug.Log("Middle position already occupied!");
-                    return;
+                    return 1;
                 }
                 middleOccupied = true;
                 break;
@@ -195,15 +193,18 @@ public class PlaySequence : MonoBehaviour
                 if (rightOccupied)
                 {
                     Debug.Log("Right position already occupied!");
-                    return;
+                    return 1;
                 }
                 rightOccupied = true;
                 break;
             default:
                 Debug.LogError("Invalid top position (must be 1, 2, or 3).");
-                return;
+                return 1;
         }
 
+        // 3) 'Remove' block from tower
+        blockObj.SetActive(false);
+        
         // 4) Place the block
         Debug.Log($"Placing block {blockTag} at {targetPos}");
 
@@ -219,6 +220,7 @@ public class PlaySequence : MonoBehaviour
             Debug.Log("3 placed! Raising plane.");
             RaisePlane();
         }
+        return 0;
     }
 
     // Copied from DestroyOnClick: toggles orientation, resets occupancy, moves plane up

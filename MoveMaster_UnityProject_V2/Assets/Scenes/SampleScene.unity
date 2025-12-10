@@ -2462,6 +2462,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   trigger: {fileID: 1533128905}
   player: {fileID: 1498338313}
+  running: {fileID: 294258448}
 --- !u!114 &1533128912
 MonoBehaviour:
   m_ObjectHideFlags: 0
